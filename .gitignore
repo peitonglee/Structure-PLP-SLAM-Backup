@@ -8,3 +8,4 @@ track_times.txt
 log.txt
 debug.txt
 *.msg
+/video
