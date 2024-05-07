@@ -477,6 +477,7 @@ namespace PLPSLAM
             // - bow_match_based_track() ~ 7ms
             // - robust_match_based_track() ~ 40ms (seems too slow to be useful), this one added by PLPSLAM authors
             // here the "first" motion-only BA will be conducted right after tracking of this frame success
+            // 追踪上一帧
             auto succeeded = track_current_frame();
 
             // FW: after tracking succeeded (no matter which tracking method was used),
@@ -488,6 +489,7 @@ namespace PLPSLAM
                 update_local_map();
 
                 // FW: here the "second" motion-BA will be conducted based on the updated local map
+                // 局部地图匹配和优化
                 succeeded = optimize_current_frame_with_local_map();
             }
 
@@ -519,6 +521,7 @@ namespace PLPSLAM
             }
 
             // check to insert the new keyframe derived from the current frame
+            // 插入关键帧
             if (succeeded && new_keyframe_is_needed())
             {
                 insert_new_keyframe();

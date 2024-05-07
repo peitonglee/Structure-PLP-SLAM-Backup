@@ -209,6 +209,8 @@ namespace PLPSLAM
         //     -> for the lm which is observed in the keyframe but not linked, add observation and update normal&depth and calculate descriptor
         //     -> add this keyframe into the map_db
         // FW: same procedure for 3D line landmark
+        // 1. 追踪到的地图点添加对当前帧的观测，三角化的地图点添加到local_map_cleaner_
+        // 2. 地图线添加了对当前帧的观测
         store_new_keyframe();
 
         // remove redundant landmarks (MapPoint Culling)
@@ -291,6 +293,10 @@ namespace PLPSLAM
 
         // update graph (check 3D points)
         const auto cur_lms = cur_keyfrm_->get_landmarks();
+
+        // 这里有两种点：
+        // 1. 直接从上一帧或局部地图追踪到的点：lm点对象中没有对当前帧的观测
+        // 2. 添加关键帧时，因为至少需要100个3D点，但有些2D经过双目立体计算拥有较好的深度，没有被追踪到，在添加关键帧时临时生成的3D点：该3D点会添加对当前帧的观测
         for (unsigned int idx = 0; idx < cur_lms.size(); ++idx)
         {
             auto lm = cur_lms.at(idx);
@@ -305,14 +311,17 @@ namespace PLPSLAM
 
             // if `lm` does not have the observation information from `cur_keyfrm_`,
             // add the association between the keyframe and the landmark
+
             if (lm->is_observed_in_keyframe(cur_keyfrm_))
             {
+                // 这里是第2种点
                 // if `lm` is correctly observed, make it be checked by the local map cleaner
                 local_map_cleaner_->add_fresh_landmark(lm);
                 continue;
             }
 
             // update connection
+            // 这里是第1种点
             lm->add_observation(cur_keyfrm_, idx);
             // update geometry
             lm->update_normal_and_depth();
@@ -338,6 +347,7 @@ namespace PLPSLAM
                 if (lm_line->is_observed_in_keyframe(cur_keyfrm_))
                 {
                     // this 3D line is observed, add it to local map cleaner
+                    // 这里只有初始化的帧才会执行
                     local_map_cleaner_->add_fresh_landmark_line(lm_line);
                     continue;
                 }

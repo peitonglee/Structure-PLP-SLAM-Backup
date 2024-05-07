@@ -120,7 +120,10 @@ namespace PLPSLAM
                 return nullptr;
             }
 
+            // rot_cw_, rot_wc_, trans_cw_, cam_center_
             curr_frm.update_pose_params();
+
+            // 将curr_frm的一些变量赋值给keyframe, 这些变量在keyframe中是public的
             auto keyfrm = new data::keyframe(curr_frm, map_db_, bow_db_);
 
             // FW: passing the segmentation image when a new keyframe created
@@ -130,7 +133,7 @@ namespace PLPSLAM
                 keyfrm->set_depth_map(curr_frm._depth_img);
             }
 
-            // FW:
+            // 设置一些keyframe的private变量
             keyfrm->set_img_rgb(curr_frm._img_rgb);
 
             frm_id_of_last_keyfrm_ = curr_frm.id_;
@@ -143,12 +146,12 @@ namespace PLPSLAM
             }
 
             // FW: RGB-D OR Stereo
-            // Store a valid depth and its index
+            // Store a valid depth and its index, 存储有效的地图点深度
             std::vector<std::pair<float, unsigned int>> depth_idx_pairs;
             depth_idx_pairs.reserve(curr_frm.num_keypts_);
             for (unsigned int idx = 0; idx < curr_frm.num_keypts_; ++idx)
             {
-                const auto depth = curr_frm.depths_.at(idx);
+                const auto depth = curr_frm.depths_.at(idx); // 双目匹配测出的深度
                 // add depth range
                 if (0 < depth)
                 {
@@ -164,7 +167,7 @@ namespace PLPSLAM
             }
 
             // Rearrange in order of proximity to the camera
-            std::sort(depth_idx_pairs.begin(), depth_idx_pairs.end());
+            std::sort(depth_idx_pairs.begin(), depth_idx_pairs.end()); // 从小到大排序
 
             // make 3D points at least min_num_to_create points using depth
             constexpr unsigned int min_num_to_create = 100;
@@ -175,12 +178,14 @@ namespace PLPSLAM
 
                 // If more points than the minimum threshold are added
                 // and the depth range exceeds the threshold, stop adding
+                // true_depth_thr_ == 40.0
                 if (min_num_to_create < count && true_depth_thr_ < depth)
                 {
                     break;
                 }
 
                 // If there is a 3D point corresponding to idx, do not stereo triangulate
+                // 如果当前的3D点从上一帧或局部地图追踪到了
                 {
                     auto lm = curr_frm.landmarks_.at(idx);
                     if (lm)
@@ -191,7 +196,10 @@ namespace PLPSLAM
                 }
 
                 // If there is no 3D corresponding to idx, make it by stereo triangulation
-                const Vec3_t pos_w = curr_frm.triangulate_stereo(idx);
+                // 如果当前的3D点没有追踪到，但是拥有较好的深度，且count < min_num_to_create
+                const Vec3_t pos_w = curr_frm.triangulate_stereo(idx); // 获取当前点的3D坐标
+
+                // 为当前点新建地图点
                 auto lm = new data::landmark(pos_w, keyfrm, map_db_);
 
                 lm->add_observation(keyfrm, idx);

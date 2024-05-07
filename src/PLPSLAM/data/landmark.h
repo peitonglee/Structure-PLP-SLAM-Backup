@@ -85,6 +85,7 @@ namespace PLPSLAM
             //! get index of associated keypoint in the specified keyframe
             int get_index_in_keyframe(keyframe *keyfrm) const;
             //! whether this landmark is observed in the specified keyframe
+            // 这个地图点是否被传进来的这个关键帧看到
             bool is_observed_in_keyframe(keyframe *keyfrm) const;
 
             //! check the distance between landmark and camera is in ORB scale variance
@@ -144,6 +145,8 @@ namespace PLPSLAM
             unsigned int id_;
             static std::atomic<unsigned int> next_id_;
             unsigned int first_keyfrm_id_ = 0;
+
+            // 被多少个关键帧看到过（双目如果都看到了+2）
             unsigned int num_observations_ = 0;
 
             // Variables for frame tracking.
@@ -165,6 +168,7 @@ namespace PLPSLAM
             Vec3_t pos_w_;
 
             //! observations (keyframe and keypoint index)
+            // <被哪个关键帧看到过, 是这个关键帧的第几个点>
             std::map<keyframe *, unsigned int> observations_;
 
             //! Normalized average vector (unit vector) of keyframe->lm, for keyframes such that observe the 3D point.

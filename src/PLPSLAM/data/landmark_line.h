@@ -79,9 +79,11 @@ namespace PLPSLAM
 
             std::map<keyframe *, unsigned int> get_observations() const; // get observations (keyframe and keyline idx)
             unsigned int num_observations() const;                       // get number of observations
-            bool has_observation() const;                                // whether this landmark is observed from more than zero keyframes
+            // 是否被任意一个关键帧看到过
+            bool has_observation() const; // whether this landmark is observed from more than zero keyframes
 
-            int get_index_in_keyframe(keyframe *keyfrm) const;    // get index of associated keyline in the specified keyframe
+            int get_index_in_keyframe(keyframe *keyfrm) const; // get index of associated keyline in the specified keyframe
+            // 当前这根线是否被传进来的这个关键帧看到
             bool is_observed_in_keyframe(keyframe *keyfrm) const; // whether this landmark is observed in the specified keyframe
 
             cv::Mat get_descriptor() const; // get representative descriptor
@@ -129,6 +131,7 @@ namespace PLPSLAM
             unsigned int _first_keyfrm_id = 0;         // initialized in the constructor
             unsigned int _first_frame_id = 0;          // initialized in the constructor
 
+            // 被多少关键帧看到过
             unsigned int _num_observations = 0;
 
             // Variables for frame tracking.
@@ -156,6 +159,7 @@ namespace PLPSLAM
             map_database *_map_db; // initialized in the constructor
 
             // observations (keyframe and corresponding keyline index in this keyframe)
+            // <是哪个关键帧看到的这根线，是这一帧中的第几根线>
             std::map<keyframe *, unsigned int> _observations;
 
             // representative descriptor
