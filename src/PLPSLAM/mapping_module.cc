@@ -214,6 +214,10 @@ namespace PLPSLAM
         store_new_keyframe();
 
         // remove redundant landmarks (MapPoint Culling)
+        // 经过上一次mapping线程对3D点/线的维护，一些关键帧的点线/线新生成的，判断这些点/线是否是有效的、鲁棒的：
+        // 1. 有效的/不被删除的点/线：3 + lm->first_keyfrm_id_ <= cur_keyfrm_id （观察到当前地图点/线的第一帧id+3要小于当前帧id，即观察到该地图点/线的帧不能太早）
+        // 2. 不好的/被删除的点/线：will_be_erased()
+        // 3. 模棱两可的点/线 /待定: 保留在_fresh_landmarks/_fresh_landmarks_line中，待判断
         local_map_cleaner_->remove_redundant_landmarks(cur_keyfrm_->id_);
 
         // FW: MapLines Culling
@@ -224,6 +228,10 @@ namespace PLPSLAM
 
         // triangulate new landmarks between the current keyframe and each of the covisibilities
         // FW: similarly, try to match 2D line segments cross keyframes and triangulate 3D Line
+        // 1. 找到当前帧的10个1级共视帧
+        // 2. 将当前帧和共视帧进行2D点/线匹配
+        // 3. 若匹配结果中，当前帧和共视帧都没有3D点/线，则使用这个匹配结果尝试进行点/线三角化
+        // 4. 若三角化成功，为该匹配对创建一个新的3D点/线，并将新生成的3d点/线添加到local_map_cleaner_进行有效判断
         create_new_landmarks();
 
         if (keyframe_is_queued())
@@ -233,6 +241,9 @@ namespace PLPSLAM
 
         // detect and resolve the duplication of the landmarks observed in the current frame
         // FW: similar procedure for 3D lines
+        // 1. 找到当前帧的2级共视帧，先找一级共视帧10个，再找二级共视帧5个，最多可找到50个共视帧
+        // 2. 补充二级共视帧：如果共视帧没有看到这个3d点，把点重投影回共视帧，进行2d匹配（如果有值就替换掉）
+        // 3. 补充当前帧：遍历所有2级共视帧的点，如果该点不存在于当前帧，则重投影到当前帧，进行2d线匹配，补充当前帧
         update_new_keyframe();
 
         if (keyframe_is_queued() || pause_is_requested())
@@ -253,8 +264,10 @@ namespace PLPSLAM
         abort_local_BA_ = false;
         if (2 < map_db_->get_num_keyframes())
         {
+            // 如果关键帧数量大于2，则进行局部BA优化
             if (map_db_->_b_use_line_tracking)
-            { // FW: local BA using lines
+            {
+                // FW: local BA using lines
                 _local_bundle_adjuster_extended_line->optimize(cur_keyfrm_, &abort_local_BA_);
             }
             else
@@ -283,6 +296,15 @@ namespace PLPSLAM
         // }
 
         // remove redundant keyframes after local BA
+        // 经过局部BA优化后，删除冗余的关键帧：
+        // 1. 如果当前地标点对应的双目测出的深度有效: 跳过
+        // 2. 如果当前地标点对应的双目测出的深度无效，这个点是追踪到的点：
+        //    - 认为该地标点是有效观测: ++num_valid_obs
+        //    - 判断该地标点是否被三个或三个以上的关键帧看到过：
+        //        - 没有三个关键帧看到过：认为该地标点不是冗余的
+        //        - 被三个关键帧看到过：比较其余该地标点在其余关键帧中的观测尺度和在当前关键帧的观测尺度: cur_scale_level + 1 >= ngh_scale_level
+        // 如果符合尺度规则：认为这个观测是好的观测，若在该地标点的所有观测中，好的观测大于等于3就认为该地标点是冗余的: ++num_redundant_obs
+        // 3. 如果该关键帧中的所有地标点中，过度追踪观测的关键点比例超过0.9，则认为该关键帧是冗余的
         local_map_cleaner_->remove_redundant_keyframes(cur_keyfrm_);
     }
 
@@ -571,9 +593,11 @@ namespace PLPSLAM
             cv::DMatch mt = good_matches[k];
 
             // avoid duplicate triangulation
+            // 如果当前的线已经被追踪或被匹配过，则跳过
             if (cur_keyfrm->get_landmark_line(mt.queryIdx) || ngh_keyfrm->get_landmark_line(mt.trainIdx))
                 continue;
 
+            // 基于2D匹配线进行三角测量，获取3D线的普吕克向量(6行1列)
             Vec6_t pos_w_line;
             if (!triangulator_line.triangulate(mt.queryIdx, mt.trainIdx, pos_w_line))
             {
@@ -604,6 +628,7 @@ namespace PLPSLAM
 #pragma omp critical
 #endif
             {
+                // 只有三角化成功的线才会被加入local_map_cleaner_
                 // add it also to the local map cleaner
                 local_map_cleaner_->add_fresh_landmark_line(lm_line);
             }
@@ -613,18 +638,24 @@ namespace PLPSLAM
     void mapping_module::update_new_keyframe()
     {
         // get the targets to check landmark fusion
+        // 找到当前帧的2级共视帧，先找一级共视帧10个，再找二级共视帧5个，最多可找到50个共视帧
         const auto fuse_tgt_keyfrms = get_second_order_covisibilities(is_monocular_ ? 20 : 10, 5); // std::unordered_set<data::keyframe *>
 
         // resolve the duplication of landmarks between the current keyframe and the targets
+        // 1. 补充二级共视帧：如果共视帧没有看到这个3d点，把点重投影回共视帧，进行2d匹配（如果有值就替换掉）
+        // 2. 补充当前帧：遍历所有2级共视帧的点，如果该点不存在于当前帧，则重投影到当前帧，进行2d线匹配，补充当前帧
         fuse_landmark_duplication(fuse_tgt_keyfrms);
 
         // FW:
         if (map_db_->_b_use_line_tracking)
         {
+            // 1. 补充二级共视帧：如果共视帧没有看到这个3d线，把线重投影回共视帧，进行2d匹配（如果有值就替换掉）
+            // 2. 补充当前帧：遍历所有2级共视帧的线，如果该线不存在于当前帧，则重投影到当前帧，进行2d线匹配，补充当前帧
             fuse_landmark_duplication_line(fuse_tgt_keyfrms);
         }
 
         // update the geometries (3D points)
+        // 补充完当前帧后，更新一下3d点
         const auto cur_landmarks = cur_keyfrm_->get_landmarks();
         for (const auto lm : cur_landmarks)
         {
@@ -641,6 +672,7 @@ namespace PLPSLAM
         }
 
         // FW: update the geometries (3D lines)
+        // 补充完当前帧后，更新一下3d线
         if (map_db_->_b_use_line_tracking)
         {
             const auto cur_landmarks_line = cur_keyfrm_->get_landmarks_line();
@@ -661,6 +693,7 @@ namespace PLPSLAM
 
         // update the graph
         // FW: TODO: now not with 3D line for updating graph
+        // 更新当前帧的共视关系
         cur_keyfrm_->graph_node_->update_connections();
     }
 
@@ -721,6 +754,7 @@ namespace PLPSLAM
             auto cur_landmarks = cur_keyfrm_->get_landmarks();
             for (const auto fuse_tgt_keyfrm : fuse_tgt_keyfrms)
             {
+                // 2
                 matcher.replace_duplication(fuse_tgt_keyfrm, cur_landmarks);
             }
         }
@@ -784,6 +818,7 @@ namespace PLPSLAM
             // - additional matches
             // - duplication of matches
             // then, add matches and solve duplication
+            // 遍历所有2级共视帧的线，如果该线不存在于当前帧，则重投影到当前帧，进行2d线匹配，补充当前帧
             std::unordered_set<data::Line *> candidate_landmarks_to_fuse;
             candidate_landmarks_to_fuse.reserve(fuse_tgt_keyfrms.size() * cur_keyfrm_->_num_keylines);
 

@@ -76,12 +76,13 @@ namespace PLPSLAM
             // --------------------------------------------------------------------------------------------------------------------------------------
 
             // find local keyframes of the current keyframe
-            std::unordered_map<unsigned int, data::keyframe *> local_keyfrms; // id <-> keyframe*
-            local_keyfrms[curr_keyfrm->id_] = curr_keyfrm;
-            const auto curr_covisibilities = curr_keyfrm->graph_node_->get_covisibilities(); // std::vector<keyframe *>
+            std::unordered_map<unsigned int, data::keyframe *> local_keyfrms;                // <关键帧id, 关键帧指针>
+            local_keyfrms[curr_keyfrm->id_] = curr_keyfrm;                                   // 先把当前关键帧放进局部关键帧地图
+            const auto curr_covisibilities = curr_keyfrm->graph_node_->get_covisibilities(); // 寻找当前关键帧的共视帧
 
             // Aggregate local keyframes
             // loop though all the keyframes which have co-visibility -> observe common 3D points
+            // 遍历所有共视关键帧，将有效的关键帧加入local_keyfrms中
             for (auto local_keyfrm : curr_covisibilities)
             {
                 if (!local_keyfrm)
@@ -105,6 +106,7 @@ namespace PLPSLAM
 
             // Aggregate local landmarks (both points and lines)
             // loop through all the local keyframes to find local landmarks
+            // 遍历所有局部关键帧，将有效的局部地图点/线加入local_lms和local_lms_line中
             for (auto local_keyfrm : local_keyfrms)
             {
                 // Aggregate 3D points
@@ -155,10 +157,12 @@ namespace PLPSLAM
 
             // "fixed" keyframes: keyframes which observe local landmarks but which are NOT in local keyframes
             // those keyframe will be included in optimization, but the pose will not be updated
+            // “固定”关键帧: 观察局部地标但不在局部关键帧中的关键帧，这些关键帧将用来优化，但姿态不更新
             std::unordered_map<unsigned int, data::keyframe *> fixed_keyfrms;
 
             // FW: Aggregate fixed keyframes
             // loop through all the local landmarks we found before to find more (fixed) keyframe
+            // 遍历局部关键中的所有地图点，扩充fixed_keyfrms
             for (auto local_lm : local_lms)
             {
                 const auto observations = local_lm.second->get_observations(); // std::map<keyframe *, unsigned int>
@@ -175,12 +179,14 @@ namespace PLPSLAM
                     }
 
                     // Do not add if it belongs to local keyframes
+                    // 不存在于局部关键帧列表中
                     if (local_keyfrms.count(fixed_keyfrm->id_))
                     {
                         continue;
                     }
 
                     // Avoid duplication
+                    // 避免重复，可能有多个地标被同一个帧看到
                     if (fixed_keyfrms.count(fixed_keyfrm->id_))
                     {
                         continue;
@@ -191,6 +197,7 @@ namespace PLPSLAM
             }
 
             // FW: Aggregate fixed keyframes using local lines
+            // 遍历局部关键中的所有地图线，扩充fixed_keyfrms
             for (auto local_lm_line : local_lms_line)
             {
                 const auto observations = local_lm_line.second->get_observations(); // std::map<keyframe *, unsigned int>
@@ -208,12 +215,14 @@ namespace PLPSLAM
                     }
 
                     // Do not add if it belongs to local keyframes
+                    // 不存在于局部关键帧列表中
                     if (local_keyfrms.count(fixed_keyfrm->id_))
                     {
                         continue;
                     }
 
                     // Avoid duplication
+                    // 避免重复，可能有多个地标被同一个帧看到
                     if (fixed_keyfrms.count(fixed_keyfrm->id_))
                     {
                         continue;
@@ -263,18 +272,22 @@ namespace PLPSLAM
             // shot vertex container, just a vector saves all the vertex
             g2o::se3::shot_vertex_container keyfrm_vtx_container(0, local_keyfrms.size() + fixed_keyfrms.size());
             // Save the converted keyframes to vertex
+            // 局部关键帧和固定关键帧存在一起
             std::unordered_map<unsigned int, data::keyframe *> all_keyfrms;
 
             // Set local keyframes to optimizer
+            // 添加图优化的定点Vertex -- local_keyfrms
             for (auto &id_local_keyfrm_pair : local_keyfrms)
             {
                 auto local_keyfrm = id_local_keyfrm_pair.second;
 
                 all_keyfrms.emplace(id_local_keyfrm_pair);
+                // TODO: 研究创建的顶点的数据类型
                 auto keyfrm_vtx = keyfrm_vtx_container.create_vertex(local_keyfrm, local_keyfrm->id_ == 0); // local_keyfrm->id_ == 0 return false, this vertex will not remain constant
                 optimizer.addVertex(keyfrm_vtx);
             }
 
+            // 添加图优化的定点Vertex -- fixed_keyfrms
             // Set fixed keyframes to optimizer
             for (auto &id_fixed_keyfrm_pair : fixed_keyfrms)
             {
@@ -296,6 +309,8 @@ namespace PLPSLAM
 
             // Chi-square value with significance level of 5%
             // Degrees of freedom n=2
+            // 卡方值，显著性水平为5%
+            // 自由度 n=2
             constexpr float chi_sq_2D = 5.99146;
             const float sqrt_chi_sq_2D = std::sqrt(chi_sq_2D);
             // Degrees of freedom n=3
@@ -304,16 +319,24 @@ namespace PLPSLAM
 
             // [4.1] standard point landmark
             // landmark vertex container
+            // 地标也需要被优化，存放地标点图优化定点
             g2o::landmark_vertex_container lm_vtx_container(keyfrm_vtx_container.get_max_vertex_id() + 1, local_lms.size());
+
             // container of reprojection edge
+            // 图优化边的数据类型
             using reproj_edge_wrapper = g2o::se3::reproj_edge_wrapper<data::keyframe>;
+
+            // 存放所有3D点创建的图优化边
             std::vector<reproj_edge_wrapper> reproj_edge_wraps;
             reproj_edge_wraps.reserve(all_keyfrms.size() * local_lms.size());
+
+            // 遍历所有局部地标点，创建地标点的图顶点
             for (auto &id_local_lm_pair : local_lms)
             {
                 auto local_lm = id_local_lm_pair.second;
 
                 // Convert landmark to g2o vertex and set to optimizer
+                // 创建地标点的顶点
                 auto lm_vtx = lm_vtx_container.create_vertex(local_lm, false); // false -> vertex not constant, will be optimized
                 optimizer.addVertex(lm_vtx);
 
@@ -332,15 +355,18 @@ namespace PLPSLAM
                         continue;
                     }
 
-                    const auto keyfrm_vtx = keyfrm_vtx_container.get_vertex(keyfrm); // keyframe vertex
-                    const auto &undist_keypt = keyfrm->undist_keypts_.at(idx);       // undistorted keypoint
-                    const float x_right = keyfrm->stereo_x_right_.at(idx);           // if monocular, x_right <0
+                    const auto keyfrm_vtx = keyfrm_vtx_container.get_vertex(keyfrm); // 这个地标点属于哪个关键帧顶点
+
+                    // 获取这个关键帧相关基础数据
+                    const auto &undist_keypt = keyfrm->undist_keypts_.at(idx); // undistorted keypoint
+                    const float x_right = keyfrm->stereo_x_right_.at(idx);     // if monocular, x_right <0
                     const float inv_sigma_sq = keyfrm->inv_level_sigma_sq_.at(undist_keypt.octave);
                     const auto sqrt_chi_sq = (keyfrm->camera_->setup_type_ == camera::setup_type_t::Monocular)
                                                  ? sqrt_chi_sq_2D
                                                  : sqrt_chi_sq_3D;
 
                     // create reprojection_error edge between keyframe vertex and landmark vertex
+                    // 创建一个边，连接关键帧顶点和地标顶点
                     auto reproj_edge_wrap = reproj_edge_wrapper(keyfrm, keyfrm_vtx, local_lm, lm_vtx,
                                                                 idx, undist_keypt.pt.x, undist_keypt.pt.y, x_right,
                                                                 inv_sigma_sq, sqrt_chi_sq);
@@ -358,10 +384,14 @@ namespace PLPSLAM
 
             // FW:
             // [4.2] add 3D line as vertex, and edge with keyframe
+            // 地标线也需要被优化，存放地标线创建的图优化顶点
             g2o::landmark_vertex_container_line3d line3d_vtx_container(lm_vtx_container.get_max_vertex_id() + 1, local_lms_line.size());
+
+            // 存放所有3D线创建的图优化边
             std::vector<reproj_edge_wrapper> reproj_edge_wraps_for_line3d;
             reproj_edge_wraps_for_line3d.reserve(all_keyfrms.size() * local_lms_line.size());
 
+            // 遍历所有局部地标线，创建地标线的图顶点
             if (!local_lms_line.empty())
             {
                 for (auto &id_local_lm_line_pair : local_lms_line)
@@ -374,10 +404,12 @@ namespace PLPSLAM
                     }
 
                     // convert landmark to g2o vertex and set to optimizer
+                    // 创建地标线的图优化顶点
                     auto line3d_vtx = line3d_vtx_container.create_vertex(local_lm_line->_id, local_lm_line->get_PlueckerCoord(), false);
                     optimizer.addVertex(line3d_vtx);
 
                     // add edge between 3D line and keyframe
+                    // 连接3D线顶点和关键帧顶点
                     const auto observations = local_lm_line->get_observations();
                     if (observations.empty())
                     {
@@ -397,12 +429,15 @@ namespace PLPSLAM
                             continue;
                         }
 
-                        const auto keyfrm_vtx = keyfrm_vtx_container.get_vertex(keyfrm); // keyframe vertex
-                        const auto &keyline = keyfrm->_keylsd.at(idx);                   // undistorted keyline
+                        const auto keyfrm_vtx = keyfrm_vtx_container.get_vertex(keyfrm); // 这个地标线属于哪个关键帧顶点
+
+                        // 获取这个关键帧相关基础数据
+                        const auto &keyline = keyfrm->_keylsd.at(idx); // undistorted keyline
                         const float inv_sigma_sq = keyfrm->_inv_level_sigma_sq_lsd.at(keyline.octave);
                         const auto sqrt_chi_sq = sqrt_chi_sq_2D;
 
                         // create reprojection_error edge between keyframe vertex and 3D line vertex
+                        // 创建一个边，连接关键帧顶点和3D线顶点
                         auto line_reproj_edge = reproj_edge_wrapper(keyfrm, keyfrm_vtx, line3d_vtx, idx,
                                                                     keyline.getStartPoint(), keyline.getEndPoint(),
                                                                     inv_sigma_sq, sqrt_chi_sq);
@@ -455,6 +490,7 @@ namespace PLPSLAM
 
             if (run_robust_BA)
             {
+                // 遍历3D点创建的所有图优化边，判断优化结果，如果大于5%的卡方值，则认为是异常值，需要剔除
                 for (auto &reproj_edge_wrap : reproj_edge_wraps)
                 {
                     auto edge = reproj_edge_wrap.edge_;
@@ -484,6 +520,7 @@ namespace PLPSLAM
                 }
 
                 // FW: remove 3D line outliers
+                // 遍历3D线所有的图优化边，判断优化结果，如果大于5%的卡方值，则认为是异常值，需要剔除
                 if (!reproj_edge_wraps_for_line3d.empty())
                 {
                     for (auto &line_reproj_edge : reproj_edge_wraps_for_line3d)
@@ -525,7 +562,7 @@ namespace PLPSLAM
             std::vector<std::pair<data::keyframe *, data::Line *>> outlier_observations_line;
             outlier_observations_line.reserve(reproj_edge_wraps_for_line3d.size());
 
-            // point
+            // points: 判断优化结果，如果大于5%的卡方值或深度不可用，则添加到outlier_observations中
             for (auto &reproj_edge_wrap : reproj_edge_wraps)
             {
                 auto edge = reproj_edge_wrap.edge_;
@@ -552,7 +589,7 @@ namespace PLPSLAM
                 }
             }
 
-            // FW: aggregate 3D line outliers
+            // lines: 判断优化结果，如果大于5%的卡方值或深度不可用，则添加到outlier_observations_line中
             if (!reproj_edge_wraps_for_line3d.empty())
             {
                 for (auto &line_reproj_edge : reproj_edge_wraps_for_line3d)
@@ -586,6 +623,7 @@ namespace PLPSLAM
                 std::lock_guard<std::mutex> lock(data::map_database::mtx_database_);
 
                 // remove outlier landmark from keyframe, and remove the link between landmark to keyframe
+                // Points: 从关键帧中清楚异常地标点，并清除地标点和关键帧之间的链接
                 if (!outlier_observations.empty())
                 {
                     for (auto &outlier_obs : outlier_observations) // keyframe* <-> 3D point*
@@ -603,6 +641,7 @@ namespace PLPSLAM
                 }
 
                 // FW: remove 3D line observation
+                // Lines: 从关键帧中清除异常地标线，并清除线和关键帧之间的链接
                 if (!outlier_observations_line.empty())
                 {
                     for (auto &outlier_obs_line : outlier_observations_line)
@@ -620,6 +659,7 @@ namespace PLPSLAM
                 }
 
                 // Update pose of local keyframe
+                // 更新局部关键帧的位姿
                 for (auto id_local_keyfrm_pair : local_keyfrms)
                 {
                     auto local_keyfrm = id_local_keyfrm_pair.second;
@@ -629,6 +669,7 @@ namespace PLPSLAM
                 }
 
                 // Update 3D position of landmark
+                // point: 因为3d点也是图优化顶点，所以优化后的信息需要进行更新
                 for (auto id_local_lm_pair : local_lms)
                 {
                     auto local_lm = id_local_lm_pair.second;
@@ -639,6 +680,7 @@ namespace PLPSLAM
                 }
 
                 // FW: Update the position of 3D line
+                // lines: 因为3d线也是图优化顶点，所以优化后的信息需要进行更新
                 if (!local_lms_line.empty())
                 {
                     for (auto id_local_lm_line_pair : local_lms_line)
@@ -652,6 +694,7 @@ namespace PLPSLAM
                         local_lm_line->set_PlueckerCoord_without_update_endpoints(pos_w_pluecker);
 
                         // update endpoints, only for map visualization: endpoints trimming
+                        // 端点剪切
                         Vec6_t updated_pose_w;
                         if (endpoint_trimming(local_lm_line, pos_w_pluecker, updated_pose_w))
                         {

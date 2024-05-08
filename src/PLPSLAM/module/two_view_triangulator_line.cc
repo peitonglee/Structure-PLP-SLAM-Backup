@@ -54,9 +54,11 @@ namespace PLPSLAM
             // get 2D line segments and function (parameters)
             cv::line_descriptor::KeyLine keyline1 = keyfrm_1_->_keylsd[idx_1];
             cv::line_descriptor::KeyLine keyline2 = keyfrm_2_->_keylsd[idx_2];
+            // 两个2D线段的
             Vec3_t keyline1_function = keyfrm_1_->_keyline_functions[idx_1];
             Vec3_t keyline2_function = keyfrm_2_->_keyline_functions[idx_2];
 
+            // goot_match的keyline_1_right==1，不是goot_match的keyline_1_right==-1
             const float keyline_1_right = keyfrm_1_->_stereo_x_right_cooresponding_to_keylines[idx_1].first;
             const bool is_stereo_1 = (0 <= keyline_1_right);
 
@@ -65,7 +67,9 @@ namespace PLPSLAM
 
             // convert keyline's middle point to bearings and compute the parallax between keyframe_1 and keyframe_2
             // bearing in keyframe_1
-            const double x_normalized_1 = (keyline1.pt.x - _camera->cx_) / _camera->fx_;
+            // keyline1.pt: 表示2D线段的中点
+            // ray_c_1: 表示从相机光心到2D线段的中点的单位向量
+            const double x_normalized_1 = (keyline1.pt.x - _camera->cx_) / _camera->fx_; // 2d线的中点归一化像素坐标
             const double y_normalized_1 = (keyline1.pt.y - _camera->cy_) / _camera->fy_;
             const auto l2_norm_1 = std::sqrt(x_normalized_1 * x_normalized_1 + y_normalized_1 * y_normalized_1 + 1.0);
             Vec3_t ray_c_1 = Vec3_t{x_normalized_1 / l2_norm_1,
@@ -81,6 +85,7 @@ namespace PLPSLAM
                                     1.0 / l2_norm_2};
 
             // rays with the world reference
+            // 将相机坐标系的点转化到世界坐标系
             const Vec3_t ray_w_1 = rot_w1_ * ray_c_1;
             const Vec3_t ray_w_2 = rot_w2_ * ray_c_2;
             const auto cos_rays_parallax = ray_w_1.dot(ray_w_2);
