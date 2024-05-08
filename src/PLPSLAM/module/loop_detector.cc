@@ -67,6 +67,7 @@ namespace PLPSLAM
         {
             // if the loop detector is disabled or the loop has been corrected recently (less than 10 frames),
             // do not perform the loop correction
+            // 距离上一次回环不到10帧，则不进行回环检测
             if (!loop_detector_is_enabled_ || cur_keyfrm_->id_ < prev_loop_correct_keyfrm_id_ + 10)
             {
                 // register to the BoW database
@@ -77,9 +78,11 @@ namespace PLPSLAM
             // [1] search loop candidates by inquiring to the BoW database
 
             // before inquiring, compute the minimum score of BoW similarity between the current and each of the covisibilities
+            // 在查询之前，计算当前和每个共视帧之间的最小BoW相似度得分
             const float min_score = compute_min_score_in_covisibilities(cur_keyfrm_);
 
             // inquiring to the BoW database about the similar keyframe whose score is lower than min_score
+            // 获取潜在的回环候选关键帧
             const std::vector<data::keyframe *> init_loop_candidates = bow_db_->acquire_loop_candidates(cur_keyfrm_, min_score);
 
             // if no candidates are found, cannot perform the loop correction

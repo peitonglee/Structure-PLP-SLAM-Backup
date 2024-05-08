@@ -139,17 +139,21 @@ namespace PLPSLAM
             }
 
             // not to be removed during loop detection and correction
+            // 在回路检测和校正过程中不得移除
             cur_keyfrm_->set_not_to_be_erased();
 
             // pass the current keyframe to the loop detector
+            // 将当前关键帧传递给回环检测器
             loop_detector_->set_current_keyframe(cur_keyfrm_);
 
             // detect some loop candidate with BoW
             // FW: [1] detect loop candidates -> get candidate keyframes
+            // 判断回环检测的条件是否满足
             if (!loop_detector_->detect_loop_candidates())
             {
                 // could not find
                 // allow the removal of the current keyframe
+                // 没有达到回环的条件，设置当前关键帧可以被删除
                 cur_keyfrm_->set_to_be_erased();
                 continue;
             }
