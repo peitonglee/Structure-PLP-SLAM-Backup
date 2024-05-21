@@ -29,22 +29,22 @@
 #include "socket_publisher/publisher.h"
 #endif
 
-#include "PLPSLAM/system.h"
 #include "PLPSLAM/config.h"
-#include "PLPSLAM/util/stereo_rectifier.h"
+#include "PLPSLAM/system.h"
 #include "PLPSLAM/util/image_converter.h"
+#include "PLPSLAM/util/stereo_rectifier.h"
 
-#include <iostream>
 #include <algorithm>
-#include <fstream>
 #include <chrono>
+#include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <numeric>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include <spdlog/spdlog.h>
 #include <popl.hpp>
+#include <spdlog/spdlog.h>
 
 #ifdef USE_STACK_TRACE_LOGGER
 #include <glog/logging.h>
@@ -54,10 +54,9 @@
 #include <gperftools/profiler.h>
 #endif
 
-void mono_tracking(const std::shared_ptr<PLPSLAM::config> &cfg,
-                   const std::string &vocab_file_path, const std::string &sequence_dir_path,
-                   const unsigned int frame_skip, const bool no_sleep, const bool auto_term,
-                   const bool eval_log, const std::string &map_db_path, const bool equal_hist)
+void mono_tracking(const std::shared_ptr<PLPSLAM::config> &cfg, const std::string &vocab_file_path,
+                   const std::string &sequence_dir_path, const unsigned int frame_skip, const bool no_sleep,
+                   const bool auto_term, const bool eval_log, const std::string &map_db_path, const bool equal_hist)
 {
     const euroc_sequence sequence(sequence_dir_path);
     const auto frames = sequence.get_frames();
@@ -80,79 +79,78 @@ void mono_tracking(const std::shared_ptr<PLPSLAM::config> &cfg,
     track_times.reserve(frames.size());
 
     // run the SLAM in another thread
-    std::thread thread([&]()
-                       {
-                           for (unsigned int i = 0; i < frames.size(); ++i)
-                           {
-                               const auto &frame = frames.at(i);
-                               cv::Mat img;
-                               if (equal_hist)
-                               {
-                                   img = cv::imread(frame.left_img_path_, cv::IMREAD_UNCHANGED);
-                                   PLPSLAM::util::equalize_histogram(img);
-                               }
-                               else
-                               {
-                                   img = cv::imread(frame.left_img_path_, cv::IMREAD_GRAYSCALE);
-                               }
+    std::thread thread([&]() {
+        for (unsigned int i = 0; i < frames.size(); ++i)
+        {
+            const auto &frame = frames.at(i);
+            cv::Mat img;
+            if (equal_hist)
+            {
+                img = cv::imread(frame.left_img_path_, cv::IMREAD_UNCHANGED);
+                PLPSLAM::util::equalize_histogram(img);
+            }
+            else
+            {
+                img = cv::imread(frame.left_img_path_, cv::IMREAD_GRAYSCALE);
+            }
 
-                               // FW: read planar segmentation mask
-                               const auto seg_mask_img = cv::imread(frame._mask_img_path, cv::IMREAD_UNCHANGED);
-                               assert(img.rows == seg_mask_img.rows);
-                               assert(img.cols == seg_mask_img.cols);
+            // FW: read planar segmentation mask
+            const auto seg_mask_img = cv::imread(frame._mask_img_path, cv::IMREAD_UNCHANGED);
+            assert(img.rows == seg_mask_img.rows);
+            assert(img.cols == seg_mask_img.cols);
 
-                               const auto tp_1 = std::chrono::steady_clock::now();
+            const auto tp_1 = std::chrono::steady_clock::now();
 
-                               if (!img.empty() && (i % frame_skip == 0) && !seg_mask_img.empty())
-                               {
-                                   // input the current frame and estimate the camera pose
-                                   SLAM.feed_monocular_frame(img, seg_mask_img, frame.timestamp_);
-                               }
+            if (!img.empty() && (i % frame_skip == 0) && !seg_mask_img.empty())
+            {
+                // input the current frame and estimate the camera pose
+                SLAM.feed_monocular_frame(img, seg_mask_img, frame.timestamp_);
+            }
 
-                               const auto tp_2 = std::chrono::steady_clock::now();
+            const auto tp_2 = std::chrono::steady_clock::now();
 
-                               const auto track_time = std::chrono::duration_cast<std::chrono::duration<double>>(tp_2 - tp_1).count();
-                               if (i % frame_skip == 0)
-                               {
-                                   track_times.push_back(track_time);
-                               }
+            const auto track_time = std::chrono::duration_cast<std::chrono::duration<double>>(tp_2 - tp_1).count();
+            if (i % frame_skip == 0)
+            {
+                track_times.push_back(track_time);
+            }
 
-                               // wait until the timestamp of the next frame
-                               if (!no_sleep && i < frames.size() - 1)
-                               {
-                                   const auto wait_time = frames.at(i + 1).timestamp_ - (frame.timestamp_ + track_time);
-                                   if (0.0 < wait_time)
-                                   {
-                                       std::this_thread::sleep_for(std::chrono::microseconds(static_cast<unsigned int>(wait_time * 1e6)));
-                                   }
-                               }
+            // wait until the timestamp of the next frame
+            if (!no_sleep && i < frames.size() - 1)
+            {
+                const auto wait_time = frames.at(i + 1).timestamp_ - (frame.timestamp_ + track_time);
+                if (0.0 < wait_time)
+                {
+                    std::this_thread::sleep_for(std::chrono::microseconds(static_cast<unsigned int>(wait_time * 1e6)));
+                }
+            }
 
-                               // check if the termination of SLAM system is requested or not
-                               if (SLAM.terminate_is_requested())
-                               {
-                                   break;
-                               }
-                           }
+            // check if the termination of SLAM system is requested or not
+            if (SLAM.terminate_is_requested())
+            {
+                break;
+            }
+        }
 
-                           // wait until the loop BA is finished
-                           while (SLAM.loop_BA_is_running())
-                           {
-                               std::this_thread::sleep_for(std::chrono::microseconds(5000));
-                           }
+        // wait until the loop BA is finished
+        while (SLAM.loop_BA_is_running())
+        {
+            std::this_thread::sleep_for(std::chrono::microseconds(5000));
+        }
 
         // automatically close the viewer
 #ifdef USE_PANGOLIN_VIEWER
-                           if (auto_term)
-                           {
-                               viewer.request_terminate();
-                           }
+        if (auto_term)
+        {
+            viewer.request_terminate();
+        }
 #elif USE_SOCKET_PUBLISHER
-                           if (auto_term)
-                           {
-                               publisher.request_terminate();
-                           }
+        if (auto_term)
+        {
+            publisher.request_terminate();
+        }
 #endif
-                       });
+    });
 
     // run the viewer in the current thread
 #ifdef USE_PANGOLIN_VIEWER
@@ -195,10 +193,9 @@ void mono_tracking(const std::shared_ptr<PLPSLAM::config> &cfg,
     std::cout << "mean tracking time: " << total_track_time / track_times.size() << "[s]" << std::endl;
 }
 
-void stereo_tracking(const std::shared_ptr<PLPSLAM::config> &cfg,
-                     const std::string &vocab_file_path, const std::string &sequence_dir_path,
-                     const unsigned int frame_skip, const bool no_sleep, const bool auto_term,
-                     const bool eval_log, const std::string &map_db_path, const bool equal_hist)
+void stereo_tracking(const std::shared_ptr<PLPSLAM::config> &cfg, const std::string &vocab_file_path,
+                     const std::string &sequence_dir_path, const unsigned int frame_skip, const bool no_sleep,
+                     const bool auto_term, const bool eval_log, const std::string &map_db_path, const bool equal_hist)
 {
     const euroc_sequence sequence(sequence_dir_path);
     const auto frames = sequence.get_frames();
@@ -206,7 +203,7 @@ void stereo_tracking(const std::shared_ptr<PLPSLAM::config> &cfg,
     const PLPSLAM::util::stereo_rectifier rectifier(cfg);
 
     // build a SLAM system
-    PLPSLAM::system SLAM(cfg, vocab_file_path, true);
+    PLPSLAM::system SLAM(cfg, vocab_file_path, true); // b_seg_or_not = true, b_use_line_tracking = false
     // startup the SLAM process
     SLAM.startup();
 
@@ -224,89 +221,88 @@ void stereo_tracking(const std::shared_ptr<PLPSLAM::config> &cfg,
     cv::Mat left_img_rect, right_img_rect;
 
     // run the SLAM in another thread
-    std::thread thread([&]()
-                       {
-                           for (unsigned int i = 0; i < frames.size(); ++i)
-                           {
-                               const auto &frame = frames.at(i);
-                               cv::Mat left_img, right_img;
-                               if (equal_hist)
-                               {
-                                   left_img = cv::imread(frame.left_img_path_, cv::IMREAD_UNCHANGED);
-                                   right_img = cv::imread(frame.right_img_path_, cv::IMREAD_UNCHANGED);
-                                   PLPSLAM::util::equalize_histogram(left_img);
-                                   PLPSLAM::util::equalize_histogram(right_img);
-                               }
-                               else
-                               {
-                                   left_img = cv::imread(frame.left_img_path_, cv::IMREAD_GRAYSCALE);
-                                   right_img = cv::imread(frame.right_img_path_, cv::IMREAD_GRAYSCALE);
-                               }
+    std::thread thread([&]() {
+        for (unsigned int i = 0; i < frames.size(); ++i)
+        {
+            const auto &frame = frames.at(i);
+            cv::Mat left_img, right_img;
+            if (equal_hist)
+            {
+                left_img = cv::imread(frame.left_img_path_, cv::IMREAD_UNCHANGED);
+                right_img = cv::imread(frame.right_img_path_, cv::IMREAD_UNCHANGED);
+                PLPSLAM::util::equalize_histogram(left_img);
+                PLPSLAM::util::equalize_histogram(right_img);
+            }
+            else
+            {
+                left_img = cv::imread(frame.left_img_path_, cv::IMREAD_GRAYSCALE);
+                right_img = cv::imread(frame.right_img_path_, cv::IMREAD_GRAYSCALE);
+            }
 
-                               if (left_img.empty() || right_img.empty())
-                               {
-                                   continue;
-                               }
+            if (left_img.empty() || right_img.empty())
+            {
+                continue;
+            }
 
-                               rectifier.rectify(left_img, right_img, left_img_rect, right_img_rect);
+            rectifier.rectify(left_img, right_img, left_img_rect, right_img_rect);
 
-                               // FW:
-                               const auto seg_mask_img = cv::imread(frame._mask_img_path, cv::IMREAD_UNCHANGED);
-                               assert(img.rows == seg_mask_img.rows);
-                               assert(img.cols == seg_mask_img.cols);
+            // FW:
+            const auto seg_mask_img = cv::imread(frame._mask_img_path, cv::IMREAD_UNCHANGED);
+            assert(img.rows == seg_mask_img.rows);
+            assert(img.cols == seg_mask_img.cols);
 
-                               const auto tp_1 = std::chrono::steady_clock::now();
+            const auto tp_1 = std::chrono::steady_clock::now();
 
-                               if (i % frame_skip == 0 && !seg_mask_img.empty())
-                               {
-                                   // input the current frame and estimate the camera pose
-                                   SLAM.feed_stereo_frame(left_img_rect, right_img_rect, seg_mask_img, frame.timestamp_);
-                               }
+            if (i % frame_skip == 0 && !seg_mask_img.empty())
+            {
+                // input the current frame and estimate the camera pose
+                SLAM.feed_stereo_frame(left_img_rect, right_img_rect, seg_mask_img, frame.timestamp_);
+            }
 
-                               const auto tp_2 = std::chrono::steady_clock::now();
+            const auto tp_2 = std::chrono::steady_clock::now();
 
-                               const auto track_time = std::chrono::duration_cast<std::chrono::duration<double>>(tp_2 - tp_1).count();
-                               if (i % frame_skip == 0)
-                               {
-                                   track_times.push_back(track_time);
-                               }
+            const auto track_time = std::chrono::duration_cast<std::chrono::duration<double>>(tp_2 - tp_1).count();
+            if (i % frame_skip == 0)
+            {
+                track_times.push_back(track_time);
+            }
 
-                               // wait until the timestamp of the next frame
-                               if (!no_sleep && i < frames.size() - 1)
-                               {
-                                   const auto wait_time = frames.at(i + 1).timestamp_ - (frame.timestamp_ + track_time);
-                                   if (0.0 < wait_time)
-                                   {
-                                       std::this_thread::sleep_for(std::chrono::microseconds(static_cast<unsigned int>(wait_time * 1e6)));
-                                   }
-                               }
+            // wait until the timestamp of the next frame
+            if (!no_sleep && i < frames.size() - 1)
+            {
+                const auto wait_time = frames.at(i + 1).timestamp_ - (frame.timestamp_ + track_time);
+                if (0.0 < wait_time)
+                {
+                    std::this_thread::sleep_for(std::chrono::microseconds(static_cast<unsigned int>(wait_time * 1e6)));
+                }
+            }
 
-                               // check if the termination of SLAM system is requested or not
-                               if (SLAM.terminate_is_requested())
-                               {
-                                   break;
-                               }
-                           }
+            // check if the termination of SLAM system is requested or not
+            if (SLAM.terminate_is_requested())
+            {
+                break;
+            }
+        }
 
-                           // wait until the loop BA is finished
-                           while (SLAM.loop_BA_is_running())
-                           {
-                               std::this_thread::sleep_for(std::chrono::microseconds(5000));
-                           }
+        // wait until the loop BA is finished
+        while (SLAM.loop_BA_is_running())
+        {
+            std::this_thread::sleep_for(std::chrono::microseconds(5000));
+        }
 
         // automatically close the viewer
 #ifdef USE_PANGOLIN_VIEWER
-                           if (auto_term)
-                           {
-                               viewer.request_terminate();
-                           }
+        if (auto_term)
+        {
+            viewer.request_terminate();
+        }
 #elif USE_SOCKET_PUBLISHER
-                           if (auto_term)
-                           {
-                               publisher.request_terminate();
-                           }
+        if (auto_term)
+        {
+            publisher.request_terminate();
+        }
 #endif
-                       });
+    });
 
     // run the viewer in the current thread
 #ifdef USE_PANGOLIN_VIEWER
@@ -367,7 +363,8 @@ int main(int argc, char *argv[])
     auto auto_term = op.add<popl::Switch>("", "auto-term", "automatically terminate the viewer");
     auto debug_mode = op.add<popl::Switch>("", "debug", "debug mode");
     auto eval_log = op.add<popl::Switch>("", "eval-log", "store trajectory and tracking times for evaluation");
-    auto map_db_path = op.add<popl::Value<std::string>>("p", "map-db", "store a map database at this path after SLAM", "");
+    auto map_db_path =
+        op.add<popl::Value<std::string>>("p", "map-db", "store a map database at this path after SLAM", "");
     auto equal_hist = op.add<popl::Switch>("", "equal-hist", "apply histogram equalization");
 
     try
@@ -426,15 +423,13 @@ int main(int argc, char *argv[])
     // run tracking
     if (cfg->camera_->setup_type_ == PLPSLAM::camera::setup_type_t::Monocular)
     {
-        mono_tracking(cfg, vocab_file_path->value(), data_dir_path->value(),
-                      frame_skip->value(), no_sleep->is_set(), auto_term->is_set(),
-                      eval_log->is_set(), map_db_path->value(), equal_hist->is_set());
+        mono_tracking(cfg, vocab_file_path->value(), data_dir_path->value(), frame_skip->value(), no_sleep->is_set(),
+                      auto_term->is_set(), eval_log->is_set(), map_db_path->value(), equal_hist->is_set());
     }
     else if (cfg->camera_->setup_type_ == PLPSLAM::camera::setup_type_t::Stereo)
     {
-        stereo_tracking(cfg, vocab_file_path->value(), data_dir_path->value(),
-                        frame_skip->value(), no_sleep->is_set(), auto_term->is_set(),
-                        eval_log->is_set(), map_db_path->value(), equal_hist->is_set());
+        stereo_tracking(cfg, vocab_file_path->value(), data_dir_path->value(), frame_skip->value(), no_sleep->is_set(),
+                        auto_term->is_set(), eval_log->is_set(), map_db_path->value(), equal_hist->is_set());
     }
     else
     {
